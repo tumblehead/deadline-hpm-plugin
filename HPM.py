@@ -5,6 +5,7 @@ from Deadline.Plugins import *
 from Deadline.Scripting import *
 
 import urllib.request
+import urllib.error
 import tempfile
 import platform
 import random
@@ -447,6 +448,34 @@ class HPMPlugin(DeadlinePlugin):
             + '\n'.join(dep_lines) + '\n'
         )
 
+    def _probe_connectivity(self):
+        """Log reachability of the endpoints hpm install needs.
+
+        Distinguishes 'reachable' (any HTTP response, incl. 4xx) from 'blocked'
+        (connection/DNS failure). hpm's sync error is opaque, so this pinpoints
+        which endpoint a locked-down render node can't reach.
+        """
+        self.LogInfo(' Probing connectivity '.center(100, '='))
+        targets = [
+            ('tumbletrove registry', 'https://api.tumbletrove.com/v1/registry'),
+            ('tumbletrove packages', 'https://pkg.tumbletrove.com/'),
+            ('pypi index', 'https://pypi.org/simple/'),
+            ('pypi files', 'https://files.pythonhosted.org/'),
+            ('github releases', 'https://github.com/3db-dk/hpm/releases/latest'),
+        ]
+        for name, url in targets:
+            try:
+                request = urllib.request.Request(
+                    url, method='HEAD',
+                    headers={'User-Agent': 'deadline-hpm-plugin'}
+                )
+                with urllib.request.urlopen(request, timeout=15) as response:
+                    self.LogInfo(f'  reachable  {name}: HTTP {response.status}  {url}')
+            except urllib.error.HTTPError as error:
+                self.LogInfo(f'  reachable  {name}: HTTP {error.code} (server responded)  {url}')
+            except Exception as error:
+                self.LogWarning(f'  BLOCKED    {name}: {error}  {url}')
+
     def _ensure_packages(self, cwd_path):
         """Make sure every requested package@version exists in the local store.
 
@@ -495,6 +524,8 @@ class HPMPlugin(DeadlinePlugin):
         # instead of a bare "Failed to sync project dependencies".
         success = self._run_hpm(['-vv', 'install', '-m', manifest_path], job_dir)
         if not success:
+            # hpm's sync error is opaque — probe which endpoint is unreachable.
+            self._probe_connectivity()
             return self.FailRender(
                 f'Failed to resolve packages via HPM: {", ".join(missing)}'
             )
