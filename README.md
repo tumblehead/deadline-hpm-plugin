@@ -50,7 +50,9 @@ Given `Package=tumblepipe@1.11.0` and a package-relative
 | `Package` | yes | Package identity, `name@version` (e.g. `tumblepipe@1.11.0`) |
 | `ScriptFile` | yes | **Package-relative** path to the task script |
 | `ExtraPackages` | no | More `name@version` specs (comma/space sep) added to PYTHONPATH + dep install |
-| `HpmExecutable` | no | `hpm` CLI for cache-miss installs; PATH name or absolute (default `hpm`) |
+| `HpmVersion` | no | hpm CLI to self-bootstrap: `latest` or pinned `vX.Y.Z` (default env `HPM_VERSION`, else `latest`) |
+| `HpmExecutable` | no | Override: explicit hpm path instead of the self-bootstrapped one |
+| `HpmManagedDirectory` | no | Where the bootstrapped hpm lives (default `~/.deadline/hpm`) |
 | `HpmPackagesDirectory` | no | Override the local store (default `~/.hpm/packages`) |
 | `PythonVersion` | no | Venv Python version (default `3.11`) |
 | `EnvironmentFile` | no | `.env` merged into the task environment |
@@ -63,12 +65,33 @@ Given `Package=tumblepipe@1.11.0` and a package-relative
 ## Worker requirements
 
 - **WSL** with `uv` on PATH (same as the UV plugin), used for the venv + render.
-- **`hpm` CLI** reachable on the worker's native PATH (or set `HpmExecutable`),
-  authenticated to the `tumbletrove` registry — needed only on a **cache miss**.
-  Pre-warming the store (`hpm install` the common versions ahead of time) keeps
-  the render path entirely offline.
+- The **`hpm` CLI is self-bootstrapped** — the plugin downloads/updates it under
+  `~/.deadline/hpm` on the first package cache miss, so render nodes need no
+  TumbleTrove Desktop install. It must be authenticated to the `tumbletrove`
+  registry for `hpm install` to pull packages.
 - The HPM store is read natively by the plugin and through `/mnt/<drive>` by the
   WSL render, so a single Windows-side store serves both.
+
+A fully **pre-warmed** worker (target hpm already in `~/.deadline/hpm`, all
+package versions already in `~/.hpm/packages`) runs the render path with **zero
+network**.
+
+## hpm self-bootstrap
+
+On a package cache miss the plugin ensures a managed hpm binary exists, mirroring
+`.ci/install_hpm.sh`:
+
+- Source: GitHub releases of [`3db-dk/hpm`](https://github.com/3db-dk/hpm),
+  per-platform asset `hpm-<tag>-<suffix>` (`windows-x86_64.exe`, `linux-x86_64`,
+  `darwin-universal`).
+- Target version: `HpmVersion` plugin info → `HPM_VERSION` env → `latest`.
+  `latest` is resolved via the GitHub API and **TTL-cached (6h)** in
+  `~/.deadline/hpm/state.json` so a worker fleet doesn't exhaust the
+  unauthenticated rate limit. A pinned `vX.Y.Z` never calls the API.
+- If the API/download is unreachable but a binary is already installed, the
+  plugin logs a warning and uses it rather than failing the render.
+- Pin per-job by setting `HpmVersion` (e.g. to the studio's central `HPM_VERSION`
+  knob) for fully deterministic, API-free resolution.
 
 ## Deployment
 

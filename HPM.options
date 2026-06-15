@@ -31,23 +31,45 @@ Required=true
 DisableIfBlank=false
 Default=
 
-[HpmExecutable]
+[HpmVersion]
 Type=string
-Label=HPM Executable
+Label=HPM Version
 Category=HPM Options
 CategoryOrder=0
 Index=3
-Description=The hpm CLI executable used to resolve packages on a cache miss. Must be on the worker's PATH or an absolute path.
+Description=hpm CLI version to self-bootstrap on a cache miss: 'latest' or a pinned tag like v0.18.0. Defaults to the HPM_VERSION env var, else 'latest'.
 Required=false
-DisableIfBlank=false
-Default=hpm
+DisableIfBlank=true
+Default=
+
+[HpmExecutable]
+Type=string
+Label=HPM Executable (override)
+Category=HPM Options
+CategoryOrder=0
+Index=4
+Description=Explicit hpm executable to use instead of the self-bootstrapped one (PATH name or absolute path). Leave blank to let the plugin manage hpm under ~/.deadline/hpm.
+Required=false
+DisableIfBlank=true
+Default=
+
+[HpmManagedDirectory]
+Type=folder
+Label=HPM Managed Directory
+Category=HPM Options
+CategoryOrder=0
+Index=5
+Description=Where the plugin stores the self-bootstrapped hpm binary (defaults to ~/.deadline/hpm).
+Required=false
+DisableIfBlank=true
+Default=
 
 [HpmPackagesDirectory]
 Type=folder
 Label=HPM Packages Directory
 Category=HPM Options
 CategoryOrder=0
-Index=4
+Index=6
 Description=Override for the worker's local HPM package store (defaults to ~/.hpm/packages).
 Required=false
 DisableIfBlank=true

@@ -4,11 +4,24 @@ from __future__ import absolute_import
 from Deadline.Plugins import *
 from Deadline.Scripting import *
 
+import urllib.request
 import tempfile
+import platform
 import random
 import string
+import json
+import time
 import re
 import os
+
+# hpm is distributed as GitHub releases by the same mechanism as the CI
+# install_hpm.sh: per-platform assets named hpm-<tag>-<suffix>. HPM_VERSION is
+# the studio's central knob (Infisical, env=prod) — "latest" or a pinned vX.Y.Z
+# — deliberately not committed anywhere so it can roll globally.
+HPM_RELEASES_REPO = '3db-dk/hpm'
+# How long a resolved "latest" tag is trusted before we re-ask the GitHub API,
+# so a worker fleet behind one NAT doesn't burn the unauthenticated rate limit.
+HPM_LATEST_TTL_SECONDS = 6 * 60 * 60
 
 def GetDeadlinePlugin():
     return HPMPlugin()
@@ -32,6 +45,44 @@ def _to_windows_path(path):
 
 def _random_env_name():
     return ''.join(random.choices(string.hexdigits, k=16))
+
+def _hpm_asset_suffix():
+    """Release asset suffix for the worker platform (see install_hpm.sh)."""
+    system = platform.system().lower()
+    if system == 'windows':
+        return 'windows-x86_64.exe'
+    if system == 'darwin':
+        return 'darwin-universal'
+    return 'linux-x86_64'
+
+def _hpm_binary_name():
+    return 'hpm.exe' if platform.system().lower() == 'windows' else 'hpm'
+
+def _http_get_json(url, timeout=30):
+    request = urllib.request.Request(url, headers={
+        'Accept': 'application/vnd.github+json',
+        'User-Agent': 'deadline-hpm-plugin',
+    })
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode('utf-8'))
+
+def _http_download(url, dest, timeout=120):
+    """Download url to dest atomically (temp file + replace on same volume)."""
+    request = urllib.request.Request(url, headers={'User-Agent': 'deadline-hpm-plugin'})
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(dest), prefix='.hpm-dl-')
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response, os.fdopen(fd, 'wb') as out:
+            while True:
+                chunk = response.read(65536)
+                if not chunk:
+                    break
+                out.write(chunk)
+        if platform.system().lower() != 'windows':
+            os.chmod(tmp, 0o755)
+        os.replace(tmp, dest)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
 
 def _split_specs(text):
     """Split a 'tumblepipe@1.11.0, tumblerig@1.5.2' string into specs."""
@@ -155,7 +206,131 @@ class HPMPlugin(DeadlinePlugin):
     # ----- HPM resolution ----------------------------------------------------
 
     def get_hpm_executable(self):
-        return self.GetPluginInfoEntryWithDefault('HpmExecutable', 'hpm')
+        """Path to a usable hpm CLI.
+
+        An explicit HpmExecutable wins (escape hatch / air-gapped workers).
+        Otherwise the plugin self-bootstraps a managed binary under
+        ~/.deadline/hpm so render nodes need no TumbleTrove Desktop install.
+        Only ever called on a package cache miss.
+        """
+        override = self.GetPluginInfoEntryWithDefault('HpmExecutable', '').strip()
+        if len(override) != 0:
+            return override
+        return self._ensure_hpm()
+
+    def get_hpm_version_target(self):
+        """Which hpm to run: HpmVersion param, else HPM_VERSION env, else latest."""
+        param = self.GetPluginInfoEntryWithDefault('HpmVersion', '').strip()
+        if len(param) != 0:
+            return param
+        env = os.environ.get('HPM_VERSION', '').strip()
+        if len(env) != 0:
+            return env
+        return 'latest'
+
+    def get_hpm_managed_dir(self):
+        configured = self.GetPluginInfoEntryWithDefault('HpmManagedDirectory', '').strip()
+        if len(configured) != 0:
+            return configured.replace('\\', '/')
+        home = os.path.expanduser('~')
+        return os.path.join(home, '.deadline', 'hpm').replace('\\', '/')
+
+    def _hpm_state_path(self, managed_dir):
+        return os.path.join(managed_dir, 'state.json')
+
+    def _load_hpm_state(self, managed_dir):
+        try:
+            with open(self._hpm_state_path(managed_dir), 'r') as handle:
+                return json.load(handle)
+        except Exception:
+            return {}
+
+    def _save_hpm_state(self, managed_dir, state):
+        try:
+            with open(self._hpm_state_path(managed_dir), 'w') as handle:
+                json.dump(state, handle)
+        except Exception as error:
+            self.LogWarning(f'Could not save hpm state: {error}')
+
+    def _hpm_download_url(self, tag, suffix):
+        return (
+            f'https://github.com/{HPM_RELEASES_REPO}/releases/download/'
+            f'{tag}/hpm-{tag}-{suffix}'
+        )
+
+    def _resolve_latest_hpm(self, managed_dir, state):
+        """Resolve the newest hpm (tag, url), TTL-cached to bound API calls.
+
+        Falls back to a stale cached resolution if the GitHub API is
+        unreachable, and to (None, None) only if we've never resolved one.
+        """
+        now = int(time.time())
+        cached_tag = state.get('latest_tag')
+        if cached_tag and (now - int(state.get('latest_checked_at', 0))) < HPM_LATEST_TTL_SECONDS:
+            return cached_tag, state.get('latest_url')
+        suffix = _hpm_asset_suffix()
+        try:
+            data = _http_get_json(
+                f'https://api.github.com/repos/{HPM_RELEASES_REPO}/releases/latest'
+            )
+            tag = data['tag_name']
+            url = next(
+                (
+                    asset['browser_download_url']
+                    for asset in data.get('assets', [])
+                    if asset['browser_download_url'].endswith('-' + suffix)
+                ),
+                self._hpm_download_url(tag, suffix)
+            )
+            state['latest_tag'] = tag
+            state['latest_url'] = url
+            state['latest_checked_at'] = now
+            self._save_hpm_state(managed_dir, state)
+            return tag, url
+        except Exception as error:
+            self.LogWarning(f'hpm latest-version check failed: {error}')
+            if cached_tag:
+                return cached_tag, state.get('latest_url')
+            return None, None
+
+    def _ensure_hpm(self):
+        """Make sure a managed hpm binary matching the target version exists."""
+        managed_dir = self.get_hpm_managed_dir()
+        os.makedirs(managed_dir, exist_ok=True)
+        binary_path = os.path.join(managed_dir, _hpm_binary_name())
+        suffix = _hpm_asset_suffix()
+        state = self._load_hpm_state(managed_dir)
+        target = self.get_hpm_version_target()
+
+        if target == 'latest':
+            tag, url = self._resolve_latest_hpm(managed_dir, state)
+        else:
+            tag = target if target.startswith('v') else f'v{target}'
+            url = self._hpm_download_url(tag, suffix)
+
+        if tag is None:
+            if os.path.isfile(binary_path):
+                self.LogWarning('Could not resolve latest hpm; using installed binary')
+                return binary_path
+            return self.FailRender('Could not resolve an hpm version and none is installed')
+
+        # Up to date already?
+        if os.path.isfile(binary_path) and state.get('version') == tag:
+            return binary_path
+
+        self.LogInfo(f'Bootstrapping hpm {tag} -> {url}')
+        try:
+            _http_download(url, binary_path)
+        except Exception as error:
+            if os.path.isfile(binary_path):
+                self.LogWarning(f'hpm download failed ({error}); using existing binary')
+                return binary_path
+            return self.FailRender(f'Failed to download hpm {tag}: {error}')
+
+        state['version'] = tag
+        state['suffix'] = suffix
+        self._save_hpm_state(managed_dir, state)
+        return binary_path
 
     def get_packages_dir(self):
         """Local HPM package store on the worker (native, forward-slashed)."""
