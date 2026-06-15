@@ -6,6 +6,7 @@ from Deadline.Scripting import *
 
 import urllib.request
 import urllib.error
+import subprocess
 import tempfile
 import platform
 import random
@@ -361,6 +362,40 @@ class HPMPlugin(DeadlinePlugin):
         if SystemUtils.IsRunningOnWindows(): return _to_windows_path(manifest)
         return _to_wsl_path(manifest)
 
+    def get_registry_url(self):
+        return self.GetPluginInfoEntryWithDefault(
+            'HpmRegistryUrl', 'https://api.tumbletrove.com/v1/registry'
+        )
+
+    def get_registry_name(self):
+        return self.GetPluginInfoEntryWithDefault('HpmRegistryName', 'tumbletrove')
+
+    def _ensure_registry(self, cwd_path):
+        """Make sure the package registry is configured in the worker's hpm.
+
+        A never-provisioned render node has zero registries, so `hpm install`
+        has nowhere to resolve packages from and fails. `hpm registry add` is
+        not idempotent (errors if the name exists), so check `registry list`
+        first and only add when missing.
+        """
+        url = self.get_registry_url()
+        name = self.get_registry_name()
+        exe = self.get_hpm_executable()
+        try:
+            result = subprocess.run(
+                [exe, 'registry', 'list'],
+                capture_output=True, text=True, timeout=30
+            )
+            if url in result.stdout:
+                return
+        except Exception as error:
+            self.LogWarning(f'Could not list hpm registries: {error}')
+        self.LogInfo(f'Configuring hpm registry: {name} -> {url}')
+        self._run_hpm(
+            ['registry', 'add', url, '--name', name, '--type', 'api'],
+            cwd_path
+        )
+
     def get_primary_package(self):
         spec = self.GetPluginInfoEntryWithDefault('Package', '')
         assert len(spec) != 0, 'Package plugin info entry is required (e.g. tumblepipe@1.11.0)'
@@ -515,14 +550,11 @@ class HPMPlugin(DeadlinePlugin):
             with open(manifest_path, 'w') as handle:
                 handle.write(self._synthesize_manifest(missing))
 
-        # Log which hpm we actually run (confirms the version pin took effect).
-        hpm_exe = self.get_hpm_executable()
-        self.LogInfo(f'hpm executable: {hpm_exe} (target {self.get_hpm_version_target()})')
-        self._run_hpm(['--version'], job_dir)
+        # A fresh render node has no registries configured — without one, hpm
+        # has nowhere to resolve packages from and install fails opaquely.
+        self._ensure_registry(job_dir)
 
-        # -vv so the underlying sync error (uv / PyPI / registry) reaches the log
-        # instead of a bare "Failed to sync project dependencies".
-        success = self._run_hpm(['-vv', 'install', '-m', manifest_path], job_dir)
+        success = self._run_hpm(['install', '-m', manifest_path], job_dir)
         if not success:
             # hpm's sync error is opaque — probe which endpoint is unreachable.
             self._probe_connectivity()
