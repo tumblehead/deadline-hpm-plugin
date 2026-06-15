@@ -220,14 +220,21 @@ class HPMPlugin(DeadlinePlugin):
         return self._ensure_hpm()
 
     def get_hpm_version_target(self):
-        """Which hpm to run: HpmVersion param, else HPM_VERSION env, else latest."""
+        """Which hpm to run: HpmVersion param, else HPM_VERSION env, else the
+        studio-pinned default.
+
+        Defaults to the studio's central HPM_VERSION knob (Infisical, prod) so
+        the worker runs the SAME hpm as CI and the submitter. Do NOT default to
+        'latest' — a new hpm release (e.g. 0.20.0) regressed `install` sync and
+        broke the farm. Keep this in lockstep with the Infisical HPM_VERSION.
+        """
         param = self.GetPluginInfoEntryWithDefault('HpmVersion', '').strip()
         if len(param) != 0:
             return param
         env = os.environ.get('HPM_VERSION', '').strip()
         if len(env) != 0:
             return env
-        return 'latest'
+        return 'v0.18.0'
 
     def get_hpm_managed_dir(self):
         configured = self.GetPluginInfoEntryWithDefault('HpmManagedDirectory', '').strip()

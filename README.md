@@ -55,7 +55,7 @@ Given `Package=tumblepipe@1.11.0` and a package-relative
 | `Package` | yes | Package identity, `name@version` (e.g. `tumblepipe@1.11.0`) |
 | `ScriptFile` | yes | **Package-relative** path to the task script |
 | `ExtraPackages` | no | More `name@version` specs (comma/space sep) added to PYTHONPATH + dep install |
-| `HpmVersion` | no | hpm CLI to self-bootstrap: `latest` or pinned `vX.Y.Z` (default env `HPM_VERSION`, else `latest`) |
+| `HpmVersion` | no | hpm CLI to self-bootstrap: pinned `vX.Y.Z` (default env `HPM_VERSION`, else studio-pinned `v0.18.0`) |
 | `HpmExecutable` | no | Override: explicit hpm path instead of the self-bootstrapped one |
 | `HpmManagedDirectory` | no | Where the bootstrapped hpm lives (default `~/.deadline/hpm`) |
 | `HpmPackagesDirectory` | no | Override the local store (default `~/.hpm/packages`) |
@@ -89,14 +89,18 @@ On a package cache miss the plugin ensures a managed hpm binary exists, mirrorin
 - Source: GitHub releases of [`3db-dk/hpm`](https://github.com/3db-dk/hpm),
   per-platform asset `hpm-<tag>-<suffix>` (`windows-x86_64.exe`, `linux-x86_64`,
   `darwin-universal`).
-- Target version: `HpmVersion` plugin info → `HPM_VERSION` env → `latest`.
-  `latest` is resolved via the GitHub API and **TTL-cached (6h)** in
-  `~/.deadline/hpm/state.json` so a worker fleet doesn't exhaust the
-  unauthenticated rate limit. A pinned `vX.Y.Z` never calls the API.
-- If the API/download is unreachable but a binary is already installed, the
-  plugin logs a warning and uses it rather than failing the render.
-- Pin per-job by setting `HpmVersion` (e.g. to the studio's central `HPM_VERSION`
-  knob) for fully deterministic, API-free resolution.
+- Target version: `HpmVersion` plugin info → `HPM_VERSION` env → the
+  studio-pinned default (`v0.18.0`). This default tracks the central
+  `HPM_VERSION` knob (Infisical, prod) so the worker runs the SAME hpm as CI and
+  the submitter. **Do not default to `latest`** — an unvetted release (0.20.0)
+  regressed `install` sync and broke the farm; keep the default in lockstep with
+  the Infisical knob.
+- A pinned `vX.Y.Z` is downloaded directly and never calls the GitHub API. If
+  `HpmVersion`/`HPM_VERSION` is explicitly set to `latest`, the newest tag is
+  resolved via the GitHub API and **TTL-cached (6h)** in
+  `~/.deadline/hpm/state.json` to bound rate-limit usage.
+- If the download is unreachable but a binary is already installed, the plugin
+  logs a warning and uses it rather than failing the render.
 
 ## Deployment
 
