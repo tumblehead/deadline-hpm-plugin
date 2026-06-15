@@ -486,7 +486,14 @@ class HPMPlugin(DeadlinePlugin):
             with open(manifest_path, 'w') as handle:
                 handle.write(self._synthesize_manifest(missing))
 
-        success = self._run_hpm(['install', '-m', manifest_path], job_dir)
+        # Log which hpm we actually run (confirms the version pin took effect).
+        hpm_exe = self.get_hpm_executable()
+        self.LogInfo(f'hpm executable: {hpm_exe} (target {self.get_hpm_version_target()})')
+        self._run_hpm(['--version'], job_dir)
+
+        # -vv so the underlying sync error (uv / PyPI / registry) reaches the log
+        # instead of a bare "Failed to sync project dependencies".
+        success = self._run_hpm(['-vv', 'install', '-m', manifest_path], job_dir)
         if not success:
             return self.FailRender(
                 f'Failed to resolve packages via HPM: {", ".join(missing)}'
