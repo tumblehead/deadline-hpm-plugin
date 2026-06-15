@@ -72,8 +72,10 @@ Given `Package=tumblepipe@1.11.0` and a package-relative
 - **WSL** with `uv` on PATH (same as the UV plugin), used for the venv + render.
 - The **`hpm` CLI is self-bootstrapped** — the plugin downloads/updates it under
   `~/.deadline/hpm` on the first package cache miss, so render nodes need no
-  TumbleTrove Desktop install. It must be authenticated to the `tumbletrove`
-  registry for `hpm install` to pull packages.
+  TumbleTrove Desktop install.
+- **No per-node registry setup.** The bundled job manifest declares its own
+  `[[registries]]`, so a render node that was never `hpm registry add`-ed still
+  resolves packages. The registry and its archives are public — no credentials.
 - The HPM store is read natively by the plugin and through `/mnt/<drive>` by the
   WSL render, so a single Windows-side store serves both.
 
