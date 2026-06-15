@@ -34,7 +34,12 @@ Given `Package=tumblepipe@1.11.0` and a package-relative
 
 1. **Resolve** the package set against the worker's local HPM store
    (`~/.hpm/packages/<name>@<version>`). Present → cache hit, no network. Missing
-   → write a throwaway manifest pinning the exact versions and `hpm install` it.
+   → `hpm install` the manifest (`Manifest`) the submitter bundled in the shared
+   job dir. hpm writes `hpm.lock`/`.hpm/` next to the manifest, so the plugin
+   copies it to a worker-local temp dir first — a render job's chunks install
+   concurrently on different workers and must not race on the shared copy. If no
+   `Manifest` is provided (legacy jobs), the plugin synthesizes one for the
+   missing specs.
 2. **Create** a fresh uv venv (`/tmp/uv-venvs/<hex>`), Python from `PythonVersion`.
 3. **Install** `python-dotenv` (for `Runner.py`) plus the resolved packages'
    declared `[python_dependencies]` (and any legacy `RequirementsFile`).

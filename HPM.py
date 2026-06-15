@@ -8,6 +8,7 @@ import urllib.request
 import tempfile
 import platform
 import random
+import shutil
 import string
 import json
 import time
@@ -340,6 +341,18 @@ class HPMPlugin(DeadlinePlugin):
         home = os.path.expanduser('~')
         return os.path.join(home, '.hpm', 'packages').replace('\\', '/')
 
+    def get_manifest_path(self):
+        """Path to the hpm.toml the submitter bundled in the shared job dir.
+
+        Authored at submit time so the resolved package set is a first-class job
+        artifact (not generated ad-hoc on the worker). Empty if not provided.
+        """
+        manifest = self.GetPluginInfoEntryWithDefault('Manifest', '')
+        if len(manifest) == 0:
+            return ''
+        if SystemUtils.IsRunningOnWindows(): return _to_windows_path(manifest)
+        return _to_wsl_path(manifest)
+
     def get_primary_package(self):
         spec = self.GetPluginInfoEntryWithDefault('Package', '')
         assert len(spec) != 0, 'Package plugin info entry is required (e.g. tumblepipe@1.11.0)'
@@ -401,13 +414,44 @@ class HPMPlugin(DeadlinePlugin):
 
     # ----- Lifecycle ---------------------------------------------------------
 
+    def _synthesize_manifest(self, specs):
+        """Fallback manifest for jobs that didn't bundle one (e.g. legacy jobs).
+
+        Note the required [package].path field — hpm refuses to load a manifest
+        without it ('Failed to load manifest').
+        """
+        dep_lines = []
+        for spec in specs:
+            if '@' in spec:
+                name, version = spec.split('@', 1)
+                # Bare version = exact registry get_version fetch. A "=" prefix
+                # is sent verbatim into the registry query and 404s.
+                dep_lines.append(f'{name} = "{version}"')
+            else:
+                dep_lines.append(f'{spec} = "*"')
+        return (
+            '[package]\n'
+            'path = "local/deadline-hpm-job"\n'
+            'name = "deadline-hpm-job"\n'
+            'version = "0.0.0"\n\n'
+            '[compat]\n'
+            'houdini = ">=21, <99"\n\n'
+            '[dependencies]\n'
+            + '\n'.join(dep_lines) + '\n'
+        )
+
     def _ensure_packages(self, cwd_path):
         """Make sure every requested package@version exists in the local store.
 
         Fast path: the store is content-addressed at packages/<name>@<version>,
-        so a present dir means a hit and we touch no network. On a miss we write
-        a throwaway manifest depending on the exact versions and `hpm install`
-        it, which populates the shared store.
+        so a present dir means a hit and we touch no network. On a miss we run
+        `hpm install` against the manifest the submitter bundled in the shared
+        job dir.
+
+        hpm writes hpm.lock + .hpm/ NEXT TO the manifest, so we never install
+        directly against the shared copy (a render job's chunks install
+        concurrently on different workers and would race). Instead we copy the
+        manifest into a worker-local temp dir and install there.
         """
         packages = self.get_packages()
         packages_dir = self.get_packages_dir()
@@ -422,28 +466,18 @@ class HPMPlugin(DeadlinePlugin):
 
         self.LogInfo(f'Resolving packages via HPM: {", ".join(missing)}')
 
-        # Build a throwaway manifest pinning the exact versions.
-        dep_lines = []
-        for spec in missing:
-            if '@' in spec:
-                name, version = spec.split('@', 1)
-                dep_lines.append(f'{name} = "={version}"')
-            else:
-                dep_lines.append(f'{spec} = "*"')
-        manifest = (
-            '[package]\n'
-            'name = "deadline-hpm-job"\n'
-            'version = "0.0.0"\n\n'
-            '[compat]\n'
-            'houdini = ">=21, <99"\n\n'
-            '[dependencies]\n'
-            + '\n'.join(dep_lines) + '\n'
-        )
-
+        # Worker-local install dir so hpm.lock / .hpm land off the shared drive.
         job_dir = tempfile.mkdtemp(prefix='hpm-job-')
         manifest_path = os.path.join(job_dir, 'hpm.toml')
-        with open(manifest_path, 'w') as handle:
-            handle.write(manifest)
+
+        bundled_manifest = self.get_manifest_path()
+        if bundled_manifest != '' and os.path.isfile(bundled_manifest):
+            self.LogInfo(f'Using bundled job manifest: {bundled_manifest}')
+            shutil.copyfile(bundled_manifest, manifest_path)
+        else:
+            self.LogInfo('No bundled manifest; synthesizing one for the missing packages')
+            with open(manifest_path, 'w') as handle:
+                handle.write(self._synthesize_manifest(missing))
 
         success = self._run_hpm(['install', '-m', manifest_path], job_dir)
         if not success:
