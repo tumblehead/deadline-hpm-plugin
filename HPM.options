@@ -1,0 +1,130 @@
+[Package]
+Type=string
+Label=Package
+Category=HPM Options
+CategoryOrder=0
+Index=0
+Description=The HPM package identity to run the task from, as name@version (e.g. tumblepipe@1.11.0). Resolved against the worker's local HPM store.
+Required=true
+DisableIfBlank=false
+Default=
+
+[ExtraPackages]
+Type=string
+Label=Extra Packages
+Category=HPM Options
+CategoryOrder=0
+Index=1
+Description=Additional package identities (comma or space separated) whose python/ dirs are added to PYTHONPATH and whose python dependencies are installed.
+Required=false
+DisableIfBlank=true
+Default=
+
+[ScriptFile]
+Type=string
+Label=Script File
+Category=HPM Options
+CategoryOrder=0
+Index=2
+Description=Package-relative path to the python script to execute (e.g. python/tumblepipe/farm/tasks/render/render.py).
+Required=true
+DisableIfBlank=false
+Default=
+
+[HpmExecutable]
+Type=string
+Label=HPM Executable
+Category=HPM Options
+CategoryOrder=0
+Index=3
+Description=The hpm CLI executable used to resolve packages on a cache miss. Must be on the worker's PATH or an absolute path.
+Required=false
+DisableIfBlank=false
+Default=hpm
+
+[HpmPackagesDirectory]
+Type=folder
+Label=HPM Packages Directory
+Category=HPM Options
+CategoryOrder=0
+Index=4
+Description=Override for the worker's local HPM package store (defaults to ~/.hpm/packages).
+Required=false
+DisableIfBlank=true
+Default=
+
+[PythonVersion]
+Type=string
+Label=Python Version
+Category=Command Script Options
+CategoryOrder=1
+Index=0
+Description=The Python Version to use.
+Required=false
+DisableIfBlank=false
+Default=3.11
+
+[EnvironmentFile]
+Type=filename
+Label=Environment File
+Category=Command Script Options
+CategoryOrder=1
+Index=1
+Description=The environment file to execute under.
+Required=false
+DisableIfBlank=false
+Default=
+
+[RequirementsFile]
+Type=filename
+Label=Requirements File
+Category=Command Script Options
+CategoryOrder=1
+Index=2
+Description=Optional extra requirements.txt. Deprecated: package python dependencies are reconstructed from the resolved package's hpm.toml.
+Required=false
+DisableIfBlank=false
+Default=
+
+[Arguments]
+Type=string
+Label=Arguments
+Category=Command Script Options
+CategoryOrder=1
+Index=3
+Description=The command arguments to use
+Required=false
+DisableIfBlank=true
+
+[StartupDirectory]
+Type=folder
+Label=Shell Startup Directory
+Category=Command Script Options
+CategoryOrder=1
+Index=4
+Description=The directory to start the command script in (leave blank to use default).
+Required=true
+DisableIfBlank=false
+Default=
+
+[CacheDirectory]
+Type=folder
+Label=UV Cache Directory
+Category=Command Script Options
+CategoryOrder=1
+Index=5
+Description=The directory for UV to cache packages (defaults to /tmp/uv-cache).
+Required=false
+DisableIfBlank=false
+Default=/tmp/uv-cache
+
+[SingleFramesOnly]
+Type=boolean
+Label=Single Frames Only
+Category=Command Script Options
+CategoryOrder=1
+Index=6
+Description=If enabled, the plugin will only render one frame at a time even if a single task contains a chunk of frames.
+Required=false
+DisableIfBlank=false
+Default=true
