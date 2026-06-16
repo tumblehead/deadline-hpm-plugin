@@ -74,9 +74,9 @@ package-env = true
    importable, its deps on `PYTHONPATH`). The context path is passed absolute
    because `hpm run` executes the script in the manifest dir, not the data dir.
 
-The task itself drives `husk.exe` and the Windows USD resolver directly, and
-bridges image tools (`oiiotool`/`ffmpeg`) to WSL where needed — none of that is
-the plugin's concern.
+The task itself drives Houdini's bundled tools directly — `husk.exe`, the Windows
+USD resolver, and `hoiiotool`/`hffmpeg` for image/video — entirely in native
+Windows python, no WSL. None of that is the plugin's concern.
 
 ## Plugin Info options
 
@@ -100,9 +100,9 @@ the plugin's concern.
 - **No per-node registry setup.** The bundled job manifest declares its own
   `[[registries]]`, so a render node that was never `hpm registry add`-ed still
   resolves packages. The registry and its archives are public — no credentials.
-- **WSL** with `ffmpeg` + `openimageio-tools` installed inside it — the task runs
-  in native Windows python but bridges those image tools to WSL. `uv` is no
-  longer required.
+- **Houdini** (matching the project's pinned version) on each worker — the task
+  drives its bundled `husk`/`hoiiotool`/`hffmpeg`/`iconvert` directly. No WSL and
+  no `uv` are required.
 
 A fully **pre-warmed** worker (target hpm already in `~/.deadline/hpm`, all
 package versions already in `~/.hpm/packages`) keeps the network footprint

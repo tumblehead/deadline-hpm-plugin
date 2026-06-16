@@ -105,9 +105,10 @@ class HPMPlugin(DeadlinePlugin):
          task inside that package-env — the package importable, its python deps
          on PYTHONPATH — entirely in native python.
 
-    The task itself bridges image tools (oiiotool/ffmpeg) to WSL where needed and
-    drives husk.exe / the Windows USD resolver directly; none of that is the
-    plugin's concern. This replaces the old design (a hand-built uv venv +
+    The task itself drives Houdini's bundled tools directly (husk.exe, the Windows
+    USD resolver, hoiiotool/hffmpeg) entirely in native Windows python — no WSL;
+    none of that is the plugin's concern. This replaces the old design (a
+    hand-built uv venv +
     PYTHONPATH + python_dependencies reconstruction + a WSL Runner.py): hpm now
     owns the environment.
     """
