@@ -1,12 +1,23 @@
+[Manifest]
+Type=filename
+Label=Job Manifest (hpm.toml)
+Category=HPM Options
+CategoryOrder=0
+Index=0
+Description=The bundled hpm.toml the worker installs and runs the task from. Its single dependency is the task package@version and its [scripts.task] runs the task module inside the package-env. Required.
+Required=false
+DisableIfBlank=false
+Default=
+
 [Package]
 Type=string
 Label=Package
 Category=HPM Options
 CategoryOrder=0
-Index=0
-Description=The HPM package identity to run the task from, as name@version (e.g. tumblepipe@1.11.0). Resolved against the worker's local HPM store.
-Required=true
-DisableIfBlank=false
+Index=1
+Description=Informational: the task package identity (name@version). The runnable package set is now defined by the bundled Manifest; this is kept for job introspection.
+Required=false
+DisableIfBlank=true
 Default=
 
 [ExtraPackages]
@@ -14,8 +25,8 @@ Type=string
 Label=Extra Packages
 Category=HPM Options
 CategoryOrder=0
-Index=1
-Description=Additional package identities (comma or space separated) whose python/ dirs are added to PYTHONPATH and whose python dependencies are installed.
+Index=2
+Description=Unused under package-env: PYTHONPATH and python dependencies are now assembled by hpm from the resolved manifest, not reconstructed by the plugin.
 Required=false
 DisableIfBlank=true
 Default=
@@ -25,10 +36,10 @@ Type=string
 Label=Script File
 Category=HPM Options
 CategoryOrder=0
-Index=2
-Description=Package-relative path to the python script to execute (e.g. python/tumblepipe/farm/tasks/render/render.py).
-Required=true
-DisableIfBlank=false
+Index=3
+Description=Informational: the package-relative task script. The task module to run is now taken from the manifest's [scripts.task] (python -m <module>), not this field.
+Required=false
+DisableIfBlank=true
 Default=
 
 [HpmVersion]
@@ -37,7 +48,7 @@ Label=HPM Version
 Category=HPM Options
 CategoryOrder=0
 Index=3
-Description=hpm CLI version to self-bootstrap on a cache miss: a pinned tag like v0.18.0 (recommended) or 'latest'. Defaults to the HPM_VERSION env var, else the studio-pinned v0.18.0. Avoid 'latest' — an unvetted hpm release can break installs.
+Description=hpm CLI version to self-bootstrap on a cache miss: a pinned tag like v0.22.1 (recommended) or 'latest'. Must be >= v0.22.1 — the task runs through hpm's package-env script mode (hpm run task). Defaults to the HPM_VERSION env var, else the studio-pinned v0.22.1. Avoid 'latest' — an unvetted hpm release can break installs.
 Required=false
 DisableIfBlank=true
 Default=
@@ -81,7 +92,7 @@ Label=Python Version
 Category=Command Script Options
 CategoryOrder=1
 Index=0
-Description=The Python Version to use.
+Description=Unused under package-env: hpm pins the interpreter to the package's Houdini-mapped CPython.
 Required=false
 DisableIfBlank=false
 Default=3.11
@@ -103,7 +114,7 @@ Label=Requirements File
 Category=Command Script Options
 CategoryOrder=1
 Index=2
-Description=Optional extra requirements.txt. Deprecated: package python dependencies are reconstructed from the resolved package's hpm.toml.
+Description=Unused under package-env: package python dependencies are installed by hpm into the package-env from the resolved manifest.
 Required=false
 DisableIfBlank=false
 Default=
@@ -131,14 +142,14 @@ Default=
 
 [CacheDirectory]
 Type=folder
-Label=UV Cache Directory
+Label=Cache Directory (unused)
 Category=Command Script Options
 CategoryOrder=1
 Index=5
-Description=The directory for UV to cache packages (defaults to /tmp/uv-cache).
+Description=Unused: the old uv venv is gone; hpm manages its own caches under ~/.hpm.
 Required=false
-DisableIfBlank=false
-Default=/tmp/uv-cache
+DisableIfBlank=true
+Default=
 
 [SingleFramesOnly]
 Type=boolean
