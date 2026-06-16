@@ -23,9 +23,9 @@ HPM_RELEASES_REPO = '3db-dk/hpm'
 # so a worker fleet behind one NAT doesn't burn the unauthenticated rate limit.
 HPM_LATEST_TTL_SECONDS = 6 * 60 * 60
 # Studio-pinned hpm fallback. package-env (the [scripts.task] mechanism this
-# plugin runs the task through) needs hpm >= 0.22.1. Keep in lockstep with the
+# plugin runs the task through) needs hpm >= 0.22.2. Keep in lockstep with the
 # Infisical HPM_VERSION knob.
-DEFAULT_HPM_VERSION = 'v0.22.1'
+DEFAULT_HPM_VERSION = 'v0.22.2'
 
 def GetDeadlinePlugin():
     return HPMPlugin()
@@ -188,7 +188,7 @@ class HPMPlugin(DeadlinePlugin):
 
     def get_hpm_version_target(self):
         """Which hpm to run: HpmVersion param, else HPM_VERSION env, else the
-        studio-pinned default (>= 0.22.1 for package-env). Do NOT default to
+        studio-pinned default (>= 0.22.2 for package-env). Do NOT default to
         'latest' — an unvetted release can change behavior under the farm.
         """
         param = self.GetPluginInfoEntryWithDefault('HpmVersion', '').strip()

@@ -48,7 +48,7 @@ Label=HPM Version
 Category=HPM Options
 CategoryOrder=0
 Index=3
-Description=hpm CLI version to self-bootstrap on a cache miss: a pinned tag like v0.22.1 (recommended) or 'latest'. Must be >= v0.22.1 — the task runs through hpm's package-env script mode (hpm run task). Defaults to the HPM_VERSION env var, else the studio-pinned v0.22.1. Avoid 'latest' — an unvetted hpm release can break installs.
+Description=hpm CLI version to self-bootstrap on a cache miss: a pinned tag like v0.22.2 (recommended) or 'latest'. Must be >= v0.22.2 — the task runs through hpm's package-env script mode (hpm run task). Defaults to the HPM_VERSION env var, else the studio-pinned v0.22.2. Avoid 'latest' — an unvetted hpm release can break installs.
 Required=false
 DisableIfBlank=true
 Default=
