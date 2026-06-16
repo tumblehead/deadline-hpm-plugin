@@ -346,7 +346,7 @@ class HPMPlugin(DeadlinePlugin):
         """
         data_dir = self.get_cwd()
         if data_dir != '':
-            self.SetProcessEnvironmentVariable('TH_FARM_DATA', data_dir)
+            self.SetEnvironmentVariable('TH_FARM_DATA', data_dir)
 
         env_path = self.get_environment_path()
         if env_path == '' or not os.path.isfile(env_path):
@@ -361,7 +361,7 @@ class HPMPlugin(DeadlinePlugin):
                 key = key.strip()
                 if len(key) == 0:
                     continue
-                self.SetProcessEnvironmentVariable(key, value.strip())
+                self.SetEnvironmentVariable(key, value.strip())
 
     def _prepare_job_dir(self):
         """Copy the bundled manifest into a worker-local dir to install + run in.
