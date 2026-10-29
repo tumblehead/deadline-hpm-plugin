@@ -47,6 +47,26 @@ def _to_wsl_path(path):
     drive = parts[0][:-1].lower()
     return '/'.join(['', 'mnt', drive] + parts[1:])
 
+def _read_env_text(path):
+    """The job's env file as text: UTF-8, else the locale's encoding.
+
+    TumblePipe writes it UTF-8. Jobs written before that used the submitter's
+    default encoding: cp1252 from inside Houdini on Windows, so a non-ASCII
+    value (a user, a path) is not valid UTF-8 there. Reading with the worker's
+    default garbled whichever one it did not expect.
+    """
+    with open(path, 'rb') as handle:
+        data = handle.read()
+    try:
+        return data.decode('utf-8')
+    except UnicodeDecodeError:
+        import locale
+        # The locale's own encoding, not Python's preferred one, which is
+        # UTF-8 again under PYTHONUTF8=1.
+        encoding = getattr(locale, 'getencoding', None)
+        encoding = encoding() if encoding else locale.getpreferredencoding(False)
+        return data.decode(encoding, errors='replace')
+
 def _native_path(path):
     """Path in the worker's own form (Windows on Windows, /mnt on Linux/WSL)."""
     if SystemUtils.IsRunningOnWindows(): return _to_windows_path(path)
@@ -352,16 +372,15 @@ class HPMPlugin(DeadlinePlugin):
         if env_path == '' or not os.path.isfile(env_path):
             return
         self.LogInfo(f'Loading job environment from: {env_path}')
-        with open(env_path, 'r') as handle:
-            for line in handle:
-                line = line.strip()
-                if len(line) == 0 or line.startswith('#') or '=' not in line:
-                    continue
-                key, value = line.split('=', 1)
-                key = key.strip()
-                if len(key) == 0:
-                    continue
-                self.SetEnvironmentVariable(key, value.strip())
+        for line in _read_env_text(env_path).splitlines():
+            line = line.strip()
+            if len(line) == 0 or line.startswith('#') or '=' not in line:
+                continue
+            key, value = line.split('=', 1)
+            key = key.strip()
+            if len(key) == 0:
+                continue
+            self.SetEnvironmentVariable(key, value.strip())
 
     def _prepare_job_dir(self):
         """Copy the bundled manifest into a worker-local dir to install + run in.

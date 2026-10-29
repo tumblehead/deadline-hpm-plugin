@@ -85,7 +85,7 @@ Windows python, no WSL. None of that is the plugin's concern.
 | `Manifest` | yes | Bundled `hpm.toml` with the task dependency + `[scripts.task]` |
 | `StartupDirectory` | yes | Shared job data dir (exported as `TH_FARM_DATA`; context resolved against it) |
 | `Arguments` | no | Task arguments — the (data-dir-relative) context path; frames are appended |
-| `EnvironmentFile` | no | `.env` whose `KEY=VALUE`s are set in the task process env |
+| `EnvironmentFile` | no | `.env` whose `KEY=VALUE`s are set in the task process env. Read as UTF-8 (what TumblePipe writes), else the worker locale's encoding (older jobs, written cp1252 from inside Houdini) |
 | `HpmVersion` | no | hpm CLI to self-bootstrap: pinned `vX.Y.Z` ≥ `v0.22.2` (default env `HPM_VERSION`, else studio-pinned `v0.22.2`) |
 | `HpmExecutable` | no | Override: explicit hpm path instead of the self-bootstrapped one |
 | `HpmManagedDirectory` | no | Where the bootstrapped hpm lives (default `~/.deadline/hpm`) |
