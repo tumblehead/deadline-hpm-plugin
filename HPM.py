@@ -25,7 +25,7 @@ HPM_LATEST_TTL_SECONDS = 6 * 60 * 60
 # Studio-pinned hpm fallback. package-env (the [scripts.task] mechanism this
 # plugin runs the task through) needs hpm >= 0.22.2. Keep in lockstep with the
 # Infisical HPM_VERSION knob.
-DEFAULT_HPM_VERSION = 'v0.22.2'
+DEFAULT_HPM_VERSION = 'v0.36.1'
 
 def GetDeadlinePlugin():
     return HPMPlugin()

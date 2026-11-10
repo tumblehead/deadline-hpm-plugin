@@ -86,7 +86,7 @@ Windows python, no WSL. None of that is the plugin's concern.
 | `StartupDirectory` | yes | Shared job data dir (exported as `TH_FARM_DATA`; context resolved against it) |
 | `Arguments` | no | Task arguments — the (data-dir-relative) context path; frames are appended |
 | `EnvironmentFile` | no | `.env` whose `KEY=VALUE`s are set in the task process env. Read as UTF-8 (what TumblePipe writes), else the worker locale's encoding (older jobs, written cp1252 from inside Houdini) |
-| `HpmVersion` | no | hpm CLI to self-bootstrap: pinned `vX.Y.Z` ≥ `v0.22.2` (default env `HPM_VERSION`, else studio-pinned `v0.22.2`) |
+| `HpmVersion` | no | hpm CLI to self-bootstrap: pinned `vX.Y.Z` ≥ `v0.22.2` (default env `HPM_VERSION`, else studio-pinned `v0.36.1`) |
 | `HpmExecutable` | no | Override: explicit hpm path instead of the self-bootstrapped one |
 | `HpmManagedDirectory` | no | Where the bootstrapped hpm lives (default `~/.deadline/hpm`) |
 | `SingleFramesOnly` | no | One frame per task (default `true`) |
@@ -117,7 +117,7 @@ On first use the plugin ensures a managed hpm binary exists, mirroring
   per-platform asset `hpm-<tag>-<suffix>` (`windows-x86_64.exe`, `linux-x86_64`,
   `darwin-universal`).
 - Target version: `HpmVersion` plugin info → `HPM_VERSION` env → the
-  studio-pinned default (`v0.22.2`). This default tracks the central
+  studio-pinned default (`v0.36.1`). This default tracks the central
   `HPM_VERSION` knob (Infisical, prod) so the worker runs the SAME hpm as CI and
   the submitter. **Do not default to `latest`** — an unvetted release can change
   behavior under the farm; keep the default in lockstep with the Infisical knob.
