@@ -465,7 +465,7 @@ class HPMPlugin(DeadlinePlugin):
     # ----- Lifecycle ---------------------------------------------------------
 
     def _export_job_environment(self):
-        """Set the env the task process needs (it has no WSL Runner to load it).
+        """Set the env the task process needs.
 
         - TH_FARM_DATA: the shared job data dir, so the task can resolve files
           bundled relative to it (it runs with CWD = the hpm manifest dir).

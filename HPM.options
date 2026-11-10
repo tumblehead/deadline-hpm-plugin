@@ -4,7 +4,7 @@ Label=Job Manifest (hpm.toml)
 Category=HPM Options
 CategoryOrder=0
 Index=0
-Description=The bundled hpm.toml the worker installs and runs the task from. Its single dependency is the task package@version and its [scripts.task] runs the task module inside the package-env. Required.
+Description=The bundled hpm.toml the worker installs and runs the task from. Its dependencies hold the task package at an exact version and its [scripts.task] runs the task module inside the package-env. Required.
 Required=false
 DisableIfBlank=false
 Default=
@@ -15,18 +15,7 @@ Label=Package
 Category=HPM Options
 CategoryOrder=0
 Index=1
-Description=Informational: the task package identity (name@version). The runnable package set is now defined by the bundled Manifest; this is kept for job introspection.
-Required=false
-DisableIfBlank=true
-Default=
-
-[ExtraPackages]
-Type=string
-Label=Extra Packages
-Category=HPM Options
-CategoryOrder=0
-Index=2
-Description=Unused under package-env: PYTHONPATH and python dependencies are now assembled by hpm from the resolved manifest, not reconstructed by the plugin.
+Description=Informational: the task package identity (name@version), kept for job introspection. The packages to install come from the Manifest.
 Required=false
 DisableIfBlank=true
 Default=
@@ -36,8 +25,8 @@ Type=string
 Label=Script File
 Category=HPM Options
 CategoryOrder=0
-Index=3
-Description=Informational: the package-relative task script. The task module to run is now taken from the manifest's [scripts.task] (python -m <module>), not this field.
+Index=2
+Description=Informational: the package-relative task script. The task to run comes from the Manifest's [scripts.task].
 Required=false
 DisableIfBlank=true
 Default=
@@ -59,7 +48,7 @@ Label=HPM Executable (override)
 Category=HPM Options
 CategoryOrder=0
 Index=4
-Description=Explicit hpm executable to use instead of the self-bootstrapped one (PATH name or absolute path). Leave blank to let the plugin manage hpm under ~/.deadline/hpm.
+Description=Explicit hpm executable to use instead of the self-bootstrapped one (PATH name or absolute path), e.g. on air-gapped workers. Leave blank to let the plugin manage hpm under ~/.deadline/hpm.
 Required=false
 DisableIfBlank=true
 Default=
@@ -75,77 +64,44 @@ Required=false
 DisableIfBlank=true
 Default=
 
-[PythonVersion]
-Type=string
-Label=Python Version
-Category=Command Script Options
+[StartupDirectory]
+Type=folder
+Label=Job Data Directory
+Category=Task Options
 CategoryOrder=1
 Index=0
-Description=Unused under package-env: hpm pins the interpreter to the package's Houdini-mapped CPython.
-Required=false
-DisableIfBlank=false
-Default=3.11
-
-[EnvironmentFile]
-Type=filename
-Label=Environment File
-Category=Command Script Options
-CategoryOrder=1
-Index=1
-Description=The environment file to execute under.
-Required=false
-DisableIfBlank=false
-Default=
-
-[RequirementsFile]
-Type=filename
-Label=Requirements File
-Category=Command Script Options
-CategoryOrder=1
-Index=2
-Description=Unused under package-env: package python dependencies are installed by hpm into the package-env from the resolved manifest.
-Required=false
+Description=The job's shared data directory, readable by every worker. Exported to the task as TH_FARM_DATA; a relative first argument is resolved against it. Required.
+Required=true
 DisableIfBlank=false
 Default=
 
 [Arguments]
 Type=string
 Label=Arguments
-Category=Command Script Options
+Category=Task Options
 CategoryOrder=1
-Index=3
-Description=The command arguments to use
+Index=1
+Description=The task's arguments, split on whitespace (usually the context path, relative to the data directory). The task's first and last frame are appended.
 Required=false
 DisableIfBlank=true
 
-[StartupDirectory]
-Type=folder
-Label=Shell Startup Directory
-Category=Command Script Options
+[EnvironmentFile]
+Type=filename
+Label=Environment File
+Category=Task Options
 CategoryOrder=1
-Index=4
-Description=The directory to start the command script in (leave blank to use default).
-Required=true
+Index=2
+Description=A .env file whose KEY=VALUE lines are set in the task's environment. Read as UTF-8, else the worker locale's encoding.
+Required=false
 DisableIfBlank=false
-Default=
-
-[CacheDirectory]
-Type=folder
-Label=Cache Directory (unused)
-Category=Command Script Options
-CategoryOrder=1
-Index=5
-Description=Unused: the old uv venv is gone; hpm manages its own caches under ~/.hpm.
-Required=false
-DisableIfBlank=true
 Default=
 
 [SingleFramesOnly]
 Type=boolean
 Label=Single Frames Only
-Category=Command Script Options
+Category=Task Options
 CategoryOrder=1
-Index=6
+Index=3
 Description=If enabled, the plugin will only render one frame at a time even if a single task contains a chunk of frames.
 Required=false
 DisableIfBlank=false
