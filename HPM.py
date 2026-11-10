@@ -88,27 +88,99 @@ def _native_path(path):
     return _to_wsl_path(path)
 
 def _manifest_registry_urls(manifest_path):
-    """The registry urls a job manifest declares, for the connectivity probe.
-
-    A line scan rather than a TOML parse: tomllib needs Python 3.11, which not
-    every Deadline release ships, and this only feeds a diagnostic.
-    """
+    """The registry urls a job manifest declares, for the connectivity probe."""
     try:
         with open(manifest_path, 'r', encoding='utf-8') as handle:
             text = handle.read()
     except Exception:
         return []
+    try:
+        import tomllib
+    except ImportError:
+        return _scan_registry_urls(text)
+    try:
+        registries = tomllib.loads(text).get('registries', [])
+        return [r['url'] for r in registries if isinstance(r.get('url'), str)]
+    except Exception:
+        return _scan_registry_urls(text)
+
+_REGISTRIES_HEADER = re.compile(r'^\[\[\s*registries\s*\]\]\s*(#.*)?$')
+_URL_LINE = re.compile(r'^url\s*=\s*(?:"([^"]*)"|\'([^\']*)\')')
+
+def _scan_registry_urls(text):
+    """`[[registries]]` urls by line scan, for Pythons without tomllib (< 3.11,
+    which some Deadline releases ship). Covers the one-key-per-line form
+    submitters write; anything fancier only costs a diagnostic line.
+    """
     urls = []
     in_registry = False
     for line in text.splitlines():
         line = line.strip()
         if line.startswith('['):
-            in_registry = line == '[[registries]]'
+            in_registry = _REGISTRIES_HEADER.match(line) is not None
             continue
-        match = re.match(r'^url\s*=\s*["\']([^"\']+)["\']', line)
+        match = _URL_LINE.match(line)
         if in_registry and match is not None:
-            urls.append(match.group(1))
+            urls.append(match.group(1) if match.group(1) is not None else match.group(2))
     return urls
+
+def _parse_env_lines(text):
+    """KEY=VALUE pairs of an env file, in order. Blank lines, `#` comments,
+    lines without `=` and empty keys are skipped; keys and values are stripped,
+    and a value may itself contain `=`.
+    """
+    pairs = []
+    for line in text.splitlines():
+        line = line.strip()
+        if len(line) == 0 or line.startswith('#') or '=' not in line:
+            continue
+        key, value = line.split('=', 1)
+        key = key.strip()
+        if len(key) == 0:
+            continue
+        pairs.append((key, value.strip()))
+    return pairs
+
+def _normalize_tag(target):
+    """An hpm version target as a release tag: `0.36.1` and `v0.36.1` both
+    become `v0.36.1`."""
+    return target if target.startswith('v') else f'v{target}'
+
+def _is_absolute_path(path):
+    """Absolute on any worker OS: a drive path (C:/ or C:\\), a POSIX path, or
+    a UNC path in either slash style."""
+    return bool(re.match(r'^[A-Za-z]:[\\/]', path)) or path.startswith(('/', '\\'))
+
+def _context_tokens(arguments, data_dir):
+    """The task's positional args, with a relative first one (the context path,
+    relative to the shared data dir) made absolute against data_dir."""
+    data_dir = data_dir.rstrip('/')
+    tokens = arguments.split()
+    if len(tokens) != 0 and data_dir != '' and not _is_absolute_path(tokens[0]):
+        tokens[0] = f'{data_dir}/{tokens[0]}'
+    return tokens
+
+def _quote_arg(arg, force=False):
+    """One argument for a process command line, by the Windows
+    CommandLineToArgvW rules (which .NET also applies to Deadline's RunProcess
+    on Linux and macOS). Quoted only when it holds whitespace or is empty,
+    unless forced. Double quotes in an argument are not supported.
+    """
+    if not force and arg != '' and not re.search(r'\s', arg):
+        return arg
+    # Backslashes are literal except before a quote, so a trailing run is
+    # doubled to keep it from escaping the closing quote.
+    trailing = arg[len(arg.rstrip('\\')):]
+    return '"' + arg + trailing + '"'
+
+def _task_command(job_dir, tokens, first_frame, last_frame):
+    """The `hpm run task` argument string for one task."""
+    args = [_quote_arg(token) for token in tokens] + [str(first_frame), str(last_frame)]
+    return ' '.join(['-C', _quote_arg(job_dir, force=True), 'run', 'task', '--'] + args)
+
+def _install_command(job_dir):
+    """The `hpm install` argument string for the worker-local job dir."""
+    return f'-C {_quote_arg(job_dir, force=True)} install'
 
 def _hpm_asset_suffix():
     """Release asset suffix for the worker platform (hpm-<tag>-<suffix>)."""
@@ -331,7 +403,7 @@ class HPMPlugin(DeadlinePlugin):
         if target == 'latest':
             tag, url = self._resolve_latest_hpm(managed_dir, state)
         else:
-            tag = target if target.startswith('v') else f'v{target}'
+            tag = _normalize_tag(target)
             url = self._hpm_download_url(tag, suffix)
 
         if tag is None:
@@ -409,15 +481,8 @@ class HPMPlugin(DeadlinePlugin):
         if env_path == '' or not os.path.isfile(env_path):
             return
         self.LogInfo(f'Loading job environment from: {env_path}')
-        for line in _read_env_text(env_path).splitlines():
-            line = line.strip()
-            if len(line) == 0 or line.startswith('#') or '=' not in line:
-                continue
-            key, value = line.split('=', 1)
-            key = key.strip()
-            if len(key) == 0:
-                continue
-            self.SetEnvironmentVariable(key, value.strip())
+        for key, value in _parse_env_lines(_read_env_text(env_path)):
+            self.SetEnvironmentVariable(key, value)
 
     def _prepare_job_dir(self):
         """Copy the bundled manifest into a worker-local dir to install + run in.
@@ -443,7 +508,7 @@ class HPMPlugin(DeadlinePlugin):
         Idempotent: on a warm store + lock it touches little network.
         """
         self.LogInfo(' Installing HPM job manifest '.center(100, '='))
-        command = f'-C "{self._job_dir}" install'
+        command = _install_command(self._job_dir)
         success = self.RunProcess(self._hpm_exe, command, self._job_dir, -1) == 0
         if not success:
             # hpm's sync error is opaque — probe which endpoint is unreachable.
@@ -468,31 +533,20 @@ class HPMPlugin(DeadlinePlugin):
         (StartupDirectory). Since the task runs with CWD = the hpm manifest dir,
         absolutize the first token against the data dir so it resolves.
         """
-        data_dir = self.get_cwd().rstrip('/')
-        tokens = self.get_arguments().split()
-        if len(tokens) != 0 and data_dir != '':
-            first = tokens[0]
-            is_absolute = bool(re.match(r'^[A-Za-z]:[\\/]', first)) or first.startswith('/')
-            if not is_absolute:
-                tokens[0] = f'{data_dir}/{first}'
-        return tokens
+        return _context_tokens(self.get_arguments(), self.get_cwd())
 
     def _render_argument(self):
         context_tokens = self._context_arguments()
         start_frame = self.GetStartFrame()
         end_frame = self.GetEndFrame()
 
-        command = (
-            ['-C', f'"{self._job_dir}"', 'run', 'task', '--']
-            + context_tokens
-            + [str(start_frame), str(end_frame)]
-        )
+        command = _task_command(self._job_dir, context_tokens, start_frame, end_frame)
 
         self.LogInfo(' Running task '.center(100, '='))
         self.LogInfo(f'Job dir: {self._job_dir}')
         self.LogInfo(f'Context args: {" ".join(context_tokens)}')
         self.LogInfo(f'Frame range: {start_frame}-{end_frame}')
-        return ' '.join(command)
+        return command
 
     def _check_exit_code(self, return_code):
         # The worker-local job dir is only needed for the duration of the task.

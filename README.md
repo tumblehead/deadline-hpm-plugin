@@ -173,10 +173,26 @@ Copy this directory to the Deadline repository's custom plugins folder:
 
 then restart the workers.
 
+## Development
+
+The plugin's path, argument, env-file and manifest helpers have
+property-based tests (pytest + Hypothesis) that run without Deadline:
+
+```sh
+python -m pip install -r requirements-dev.txt
+python -m pytest tests
+```
+
+They run on GitHub Actions for Linux and Windows on Python 3.10 (no
+`tomllib`, as on older Deadline releases) and 3.12.
+
 ## Notes and limitations
 
 - The bundled `Manifest` is **required**; there is no synthesized fallback (the
   task to run lives in its `[scripts.task]`).
+- Arguments are split on whitespace, so a context path cannot itself contain
+  spaces (relative to `StartupDirectory` it rarely needs to; the data dir
+  itself may contain spaces).
 - Submit published package versions only. A dev/editable install (a checkout,
   not a published `name@version`) has no identity a worker can resolve, so
   submitters should refuse it rather than bake in a path that only exists on
