@@ -165,13 +165,17 @@ On first use the plugin makes sure a managed hpm binary exists:
 
 ## Deployment
 
-Copy this directory to the Deadline repository's custom plugins folder:
+Download `HPM-<version>.zip` from the
+[releases](https://github.com/tumblehead/deadline-hpm-plugin/releases) and
+unzip it into the Deadline repository's custom plugins folder, so the plugin
+files land in:
 
 ```
 <DeadlineRepository>/custom/plugins/HPM/
 ```
 
-then restart the workers.
+then restart the workers. (From a checkout instead: copy `HPM.py`,
+`HPM.options`, `HPM.param` and `HPM.ico` into that folder.)
 
 ## Development
 
