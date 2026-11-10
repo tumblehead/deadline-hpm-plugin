@@ -48,7 +48,7 @@ Label=HPM Version
 Category=HPM Options
 CategoryOrder=0
 Index=3
-Description=hpm CLI version to self-bootstrap on a cache miss: a pinned tag like v0.36.1 (recommended) or 'latest'. Must be >= v0.22.2 — the task runs through hpm's package-env script mode (hpm run task). Defaults to the HPM_VERSION env var, else the studio-pinned v0.36.1. Avoid 'latest' — an unvetted hpm release can break installs.
+Description=hpm CLI version to self-bootstrap on a cache miss: a pinned tag like v0.36.1 (recommended) or 'latest'. Must be >= v0.22.2 — the task runs through hpm's package-env script mode (hpm run task). Defaults to the HPM_VERSION env var on the worker, else the version this plugin release pins (v0.36.1). Avoid 'latest' — an unvetted hpm release can break installs.
 Required=false
 DisableIfBlank=true
 Default=
@@ -71,17 +71,6 @@ Category=HPM Options
 CategoryOrder=0
 Index=5
 Description=Where the plugin stores the self-bootstrapped hpm binary (defaults to ~/.deadline/hpm).
-Required=false
-DisableIfBlank=true
-Default=
-
-[HpmPackagesDirectory]
-Type=folder
-Label=HPM Packages Directory
-Category=HPM Options
-CategoryOrder=0
-Index=6
-Description=Override for the worker's local HPM package store (defaults to ~/.hpm/packages).
 Required=false
 DisableIfBlank=true
 Default=

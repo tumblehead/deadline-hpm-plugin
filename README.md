@@ -1,40 +1,23 @@
 # HPM Deadline Plugin
 
-A Deadline plugin that runs a farm task **from an HPM package resolved on the
-worker**, so a render node reproduces the exact source and Python environment
-the job was submitted with — instead of assuming every machine mirrors the
+A Deadline plugin that runs a farm task **from an
+[HPM](https://github.com/3db-dk/hpm) package resolved on the worker**, so a
+render node reproduces the exact package versions and Python environment the
+job was submitted with, instead of assuming every machine mirrors the
 submitter's `~/.hpm` store on disk.
 
-It is the HPM-aware successor to the
-[UV plugin](https://github.com/tumblehead/deadline-uv-plugin). The two can run
-side by side during migration (jobs pick `Plugin=UV` or `Plugin=HPM`).
+The plugin is self-contained: it needs a Deadline repository, workers that can
+reach the hpm release downloads and your package registry, and a submitter that
+writes an `hpm.toml` job manifest. It has no dependency on any particular
+studio's CI, secrets store or pipeline.
 
-## Why this exists
+> **Requires hpm >= v0.22.2** (the `package-env` script mode). The plugin
+> downloads hpm itself; see [hpm self-bootstrap](#hpm-self-bootstrap).
 
-The UV plugin bakes an **absolute** `ScriptFile` at submit time. Under HPM the
-submitter runs from `~/.hpm/packages/tumblepipe@1.12.6/…`, so that submitter-
-local path is what the worker is told to run. The moment a worker doesn't have
-that exact version laid down at that exact path, the task dies with:
+## How it works
 
-```
-Script file not found: …/.hpm/packages/tumblepipe@1.12.6/…/render.py
-```
-
-It also has to reproduce the package's third-party Python dependencies
-(`pymongo`, `dictdiffer`, …) — in-Houdini those come from HPM, but a hand-built
-venv has to reconstruct them.
-
-This plugin solves both by letting **hpm itself own the environment**: the job
-bundles an `hpm.toml` whose dependency is the task package and whose
-`[scripts.task]` runs the task module with `package-env = true`. The worker
-installs that manifest and runs the task inside the resolved package-env — no
-absolute paths, no dependency reconstruction.
-
-> **Requires hpm ≥ v0.22.2** (the `package-env` script mode).
-
-## What it does, per task
-
-Given a bundled `Manifest` (`hpm.toml`) like:
+The job bundles an `hpm.toml` whose dependency is the package that holds the
+task, and whose `[scripts.task]` runs the task module with `package-env = true`:
 
 ```toml
 [package]
@@ -51,82 +34,134 @@ url = "https://api.tumbletrove.com/v1/registry"
 type = "api"
 
 [dependencies]
-"tumblehead/tumblepipe" = "1.12.6"
+"yourstudio/farm-tasks" = "1.4.0"
 
 [scripts.task]
-cmd = "python -m tumblepipe.farm.tasks.render.render"
+cmd = "python -m farm_tasks.render"
 package-env = true
 ```
 
-1. **Bootstrap** a managed `hpm` binary under `~/.deadline/hpm` if needed.
-2. **Export** the job environment so the task can run standalone: `TH_FARM_DATA`
-   (the shared job data dir) plus every `KEY=VALUE` from the job's
-   `EnvironmentFile` (`OCIO`, `TH_CONFIG_PATH`, `TH_PROJECT_PATH`, …) — the task's
-   `default_client()` reads these at import.
-3. **Install** the manifest into the worker's HPM store from a **worker-local**
-   copy: `hpm -C <job_dir> install`. This resolves the package + its
-   `[python_dependencies]` and materializes the package-env venv (interpreter
-   pinned to the package's Houdini-mapped CPython). Worker-local because hpm
-   writes `hpm.lock` next to the manifest, and a render job's chunks install
-   concurrently on different workers and must not race on the shared copy.
-4. **Run** the task: `hpm -C <job_dir> run task -- <context.json> <first> <last>`.
-   The script runs **in native Windows python** inside the package-env (package
-   importable, its deps on `PYTHONPATH`). The context path is passed absolute
-   because `hpm run` executes the script in the manifest dir, not the data dir.
+The manifest declares its own `[[registries]]`, so workers need no
+`hpm registry add`. Point it at whichever registry hosts your packages.
 
-The task itself drives Houdini's bundled tools directly — `husk.exe`, the Windows
-USD resolver, and `hoiiotool`/`hffmpeg` for image/video — entirely in native
-Windows python, no WSL. None of that is the plugin's concern.
+For each task the plugin:
+
+1. **Bootstraps** a managed `hpm` binary under `~/.deadline/hpm` if needed.
+2. **Exports** the job environment: `TH_FARM_DATA` (the shared job data dir)
+   plus every `KEY=VALUE` from the job's `EnvironmentFile`.
+3. **Installs** the manifest from a **worker-local** copy:
+   `hpm -C <job_dir> install`. This resolves the package and its
+   `[python_dependencies]` and builds the package-env venv (interpreter pinned
+   to the package's Houdini-mapped CPython). The copy is worker-local because
+   hpm writes `hpm.lock` next to the manifest, and the chunks of one job
+   install concurrently on different workers.
+4. **Runs** the task: `hpm -C <job_dir> run task -- <args...> <first> <last>`,
+   inside the package-env (package importable, its dependencies on
+   `PYTHONPATH`).
+
+## The task contract
+
+The module named in `[scripts.task]` is your code. The plugin calls it like
+this:
+
+- **Arguments:** the job's `Arguments` split on whitespace, then the task's
+  first and last frame. If the first argument is a relative path, it is made
+  absolute against `StartupDirectory`, because the task's working directory is
+  the worker-local manifest dir, not the data dir.
+- **Environment:** `TH_FARM_DATA` is the shared job data dir
+  (`StartupDirectory`), and every entry of `EnvironmentFile` is set.
+- **Progress:** a stdout line matching `Progress: NN` (an optional `%` is
+  allowed) sets the task's progress.
+- **Exit code:** non-zero fails the task.
+
+What the task does (drive `husk`, `hoiiotool`, a simulation, anything) is not
+the plugin's concern.
+
+## Submitting a job
+
+Any submitter that can write two Deadline info files works. A minimal
+submission with `deadlinecommand`:
+
+```ini
+# job_info.job
+Plugin=HPM
+Name=shot010 render
+Frames=1001-1100
+ChunkSize=1
+Pool=yourpool
+```
+
+```ini
+# plugin_info.job
+Manifest=//server/jobs/shot010/hpm.toml
+StartupDirectory=//server/jobs/shot010
+Arguments=context.json
+EnvironmentFile=//server/jobs/shot010/job.env
+```
+
+```sh
+deadlinecommand job_info.job plugin_info.job
+```
+
+Write the manifest, the data dir contents and the env file to storage every
+worker can read before submitting.
 
 ## Plugin Info options
 
 | Parameter | Required | Description |
 |---|---|---|
 | `Manifest` | yes | Bundled `hpm.toml` with the task dependency + `[scripts.task]` |
-| `StartupDirectory` | yes | Shared job data dir (exported as `TH_FARM_DATA`; context resolved against it) |
-| `Arguments` | no | Task arguments — the (data-dir-relative) context path; frames are appended |
-| `EnvironmentFile` | no | `.env` whose `KEY=VALUE`s are set in the task process env. Read as UTF-8 (what TumblePipe writes), else the worker locale's encoding (older jobs, written cp1252 from inside Houdini) |
-| `HpmVersion` | no | hpm CLI to self-bootstrap: pinned `vX.Y.Z` ≥ `v0.22.2` (default env `HPM_VERSION`, else studio-pinned `v0.36.1`) |
-| `HpmExecutable` | no | Override: explicit hpm path instead of the self-bootstrapped one |
+| `StartupDirectory` | yes | Shared job data dir (exported as `TH_FARM_DATA`; a relative first argument is resolved against it) |
+| `Arguments` | no | Task arguments; the frame range is appended |
+| `EnvironmentFile` | no | `.env` whose `KEY=VALUE`s are set in the task process env. Read as UTF-8, else the worker locale's encoding |
+| `HpmVersion` | no | hpm to self-bootstrap: pinned `vX.Y.Z` >= `v0.22.2`, or `latest`. Defaults to the worker's `HPM_VERSION` env var, else the version this plugin release pins (`v0.36.1`) |
+| `HpmExecutable` | no | Explicit hpm path instead of the self-bootstrapped one (air-gapped workers) |
 | `HpmManagedDirectory` | no | Where the bootstrapped hpm lives (default `~/.deadline/hpm`) |
-| `SingleFramesOnly` | no | One frame per task (default `true`) |
-| `Package` / `ScriptFile` | no | Informational only — the runnable set + task module come from the `Manifest` |
+| `SingleFramesOnly` | no | One frame per task (`false` when omitted from the plugin info; the Monitor form defaults it to `true`) |
+| `Package` / `ScriptFile` | no | Informational only; the task to run comes from the `Manifest` |
 
 ## Worker requirements
 
-- The **`hpm` CLI is self-bootstrapped** — the plugin downloads/updates it under
-  `~/.deadline/hpm` on the first job, so render nodes need no TumbleTrove
-  Desktop install.
-- **No per-node registry setup.** The bundled job manifest declares its own
-  `[[registries]]`, so a render node that was never `hpm registry add`-ed still
-  resolves packages. The registry and its archives are public — no credentials.
-- **Houdini** (matching the project's pinned version) on each worker — the task
-  drives its bundled `husk`/`hoiiotool`/`hffmpeg`/`iconvert` directly. No WSL and
-  no `uv` are required.
+- **Houdini**, in the version the job's packages need, if the task uses it.
+  No WSL and no `uv` are required.
+- **Network access** to:
+  - `github.com` (hpm release downloads), unless `HpmExecutable` is set or the
+    target hpm is already bootstrapped;
+  - the registries the job manifest declares, and wherever their archives are
+    hosted;
+  - `pypi.org` and `files.pythonhosted.org`, if your packages declare
+    `[python_dependencies]`.
 
-A fully **pre-warmed** worker (target hpm already in `~/.deadline/hpm`, all
-package versions already in `~/.hpm/packages`) keeps the network footprint
-minimal.
+  When `hpm install` fails, the plugin logs which of these endpoints the worker
+  can and cannot reach.
+- **Paths:** the paths in the plugin info are passed through the repository's
+  **Path Mapping** rules first, so a mixed Windows/Linux/macOS farm maps shares
+  the usual Deadline way. On top of that, the plugin converts between WSL drive
+  mounts (`/mnt/c/...`) and drive letters (`C:/...`) for the worker's OS. Other
+  paths are left as they are.
+
+A **pre-warmed** worker (target hpm already in `~/.deadline/hpm`, all package
+versions already in `~/.hpm/packages`) keeps the network footprint minimal.
 
 ## hpm self-bootstrap
 
-On first use the plugin ensures a managed hpm binary exists, mirroring
-`.ci/install_hpm.sh`:
+On first use the plugin makes sure a managed hpm binary exists:
 
-- Source: GitHub releases of [`3db-dk/hpm`](https://github.com/3db-dk/hpm),
-  per-platform asset `hpm-<tag>-<suffix>` (`windows-x86_64.exe`, `linux-x86_64`,
-  `darwin-universal`).
-- Target version: `HpmVersion` plugin info → `HPM_VERSION` env → the
-  studio-pinned default (`v0.36.1`). This default tracks the central
-  `HPM_VERSION` knob (Infisical, prod) so the worker runs the SAME hpm as CI and
-  the submitter. **Do not default to `latest`** — an unvetted release can change
-  behavior under the farm; keep the default in lockstep with the Infisical knob.
+- Source: the public GitHub releases of
+  [`3db-dk/hpm`](https://github.com/3db-dk/hpm), per-platform asset
+  `hpm-<tag>-<suffix>` (`windows-x86_64.exe`, `linux-x86_64`,
+  `darwin-universal`). No credentials are needed.
+- Target version: `HpmVersion` plugin info, then the `HPM_VERSION` env var on
+  the worker, then the version this plugin release pins. To run one hpm across
+  your whole farm, set `HPM_VERSION` on the workers. **Avoid `latest`**: an
+  unvetted hpm release can change behavior under the farm.
 - A pinned `vX.Y.Z` is downloaded directly and never calls the GitHub API. If
-  `HpmVersion`/`HPM_VERSION` is explicitly set to `latest`, the newest tag is
-  resolved via the GitHub API and **TTL-cached (6h)** in
-  `~/.deadline/hpm/state.json` to bound rate-limit usage.
-- If the download is unreachable but a binary is already installed, the plugin
-  logs a warning and uses it rather than failing the render.
+  the target is `latest`, the newest tag is resolved through the GitHub API and
+  cached for 6 hours in `~/.deadline/hpm/state.json` to stay under its rate
+  limit.
+- If the download fails but a binary is already installed, the plugin logs a
+  warning and uses it rather than failing the render.
+- Air-gapped farms: install hpm yourself and set `HpmExecutable`.
 
 ## Deployment
 
@@ -138,10 +173,19 @@ Copy this directory to the Deadline repository's custom plugins folder:
 
 then restart the workers.
 
-## Notes / current limitations
+## Notes and limitations
 
 - The bundled `Manifest` is **required**; there is no synthesized fallback (the
-  task module to run lives in the manifest's `[scripts.task]`).
-- Submitting from a **dev/editable** install (a checkout, not a published
-  `name@version`) has no identity to resolve; the submitter side rejects that
-  with a clear error rather than baking a non-reproducible path.
+  task to run lives in its `[scripts.task]`).
+- Submit published package versions only. A dev/editable install (a checkout,
+  not a published `name@version`) has no identity a worker can resolve, so
+  submitters should refuse it rather than bake in a path that only exists on
+  the submitting machine.
+
+## Background
+
+This plugin replaces an earlier design that baked an absolute `ScriptFile` into
+the job and rebuilt the task's Python dependencies in a hand-made venv. That
+broke as soon as a worker lacked the exact package version at the exact path
+the submitter had. Letting hpm resolve and own the environment on the worker
+removes both problems.

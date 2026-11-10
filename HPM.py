@@ -14,17 +14,17 @@ import time
 import re
 import os
 
-# hpm is distributed as GitHub releases by the same mechanism as the CI
-# install_hpm.sh: per-platform assets named hpm-<tag>-<suffix>. HPM_VERSION is
-# the studio's central knob (Infisical, env=prod) — "latest" or a pinned vX.Y.Z
-# — deliberately not committed anywhere so it can roll globally.
+# hpm is distributed as public GitHub releases: per-platform assets named
+# hpm-<tag>-<suffix>. A studio that wants one hpm across its farm sets the
+# HPM_VERSION env var on its workers ("latest" or a pinned vX.Y.Z); a job can
+# override it with the HpmVersion plugin info entry.
 HPM_RELEASES_REPO = '3db-dk/hpm'
 # How long a resolved "latest" tag is trusted before we re-ask the GitHub API,
 # so a worker fleet behind one NAT doesn't burn the unauthenticated rate limit.
 HPM_LATEST_TTL_SECONDS = 6 * 60 * 60
-# Studio-pinned hpm fallback. package-env (the [scripts.task] mechanism this
-# plugin runs the task through) needs hpm >= 0.22.2. Keep in lockstep with the
-# Infisical HPM_VERSION knob.
+# The hpm this plugin release is tested against, used when neither HpmVersion
+# nor HPM_VERSION is set. package-env (the [scripts.task] mechanism this plugin
+# runs the task through) needs hpm >= 0.22.2.
 DEFAULT_HPM_VERSION = 'v0.36.1'
 
 def GetDeadlinePlugin():
@@ -34,26 +34,34 @@ def CleanupDeadlinePlugin(deadlinePlugin):
     deadlinePlugin.Cleanup()
 
 def _to_windows_path(path):
+    """A WSL drive mount (/mnt/c/...) as its Windows drive path (C:/...).
+
+    Only single-letter mounts are drives; /mnt/nas/... and every other path is
+    returned unchanged (with forward slashes).
+    """
     raw_path = path.replace('\\', '/')
-    if not raw_path.startswith('/mnt/'): return raw_path
-    parts = raw_path.split('/')
-    drive = f'{parts[2].upper()}:'
-    return '/'.join([drive] + parts[3:])
+    match = re.match(r'^/mnt/([A-Za-z])(/.*)?$', raw_path)
+    if match is None: return raw_path
+    return f'{match.group(1).upper()}:{match.group(2) or ""}'
 
 def _to_wsl_path(path):
+    """A Windows drive path (C:/...) as its WSL mount (/mnt/c/...).
+
+    Anything else (a POSIX path on a native Linux or macOS worker, a UNC path)
+    is returned unchanged: only drive letters have a /mnt form.
+    """
     raw_path = path.replace('\\', '/')
-    if raw_path.startswith('/mnt/'): return raw_path
-    parts = raw_path.split('/')
-    drive = parts[0][:-1].lower()
-    return '/'.join(['', 'mnt', drive] + parts[1:])
+    match = re.match(r'^([A-Za-z]):(/.*)?$', raw_path)
+    if match is None: return raw_path
+    return f'/mnt/{match.group(1).lower()}{match.group(2) or ""}'
 
 def _read_env_text(path):
     """The job's env file as text: UTF-8, else the locale's encoding.
 
-    TumblePipe writes it UTF-8. Jobs written before that used the submitter's
-    default encoding: cp1252 from inside Houdini on Windows, so a non-ASCII
-    value (a user, a path) is not valid UTF-8 there. Reading with the worker's
-    default garbled whichever one it did not expect.
+    Submitters should write it UTF-8. One written with the submitter's default
+    encoding (cp1252 from inside Houdini on Windows) has non-ASCII values (a
+    user, a path) that are not valid UTF-8, so fall back to the worker's locale
+    rather than garble them.
     """
     with open(path, 'rb') as handle:
         data = handle.read()
@@ -68,12 +76,42 @@ def _read_env_text(path):
         return data.decode(encoding, errors='replace')
 
 def _native_path(path):
-    """Path in the worker's own form (Windows on Windows, /mnt on Linux/WSL)."""
+    """Path in the worker's own form.
+
+    The repository's Path Mapping rules are applied first, so a studio with a
+    mixed Windows/Linux/macOS farm maps its shares the usual Deadline way. What
+    is left is the WSL convenience: /mnt/<drive> becomes <DRIVE>: on Windows,
+    and a drive path becomes /mnt/<drive> elsewhere.
+    """
+    path = RepositoryUtils.CheckPathMapping(path)
     if SystemUtils.IsRunningOnWindows(): return _to_windows_path(path)
     return _to_wsl_path(path)
 
+def _manifest_registry_urls(manifest_path):
+    """The registry urls a job manifest declares, for the connectivity probe.
+
+    A line scan rather than a TOML parse: tomllib needs Python 3.11, which not
+    every Deadline release ships, and this only feeds a diagnostic.
+    """
+    try:
+        with open(manifest_path, 'r', encoding='utf-8') as handle:
+            text = handle.read()
+    except Exception:
+        return []
+    urls = []
+    in_registry = False
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith('['):
+            in_registry = line == '[[registries]]'
+            continue
+        match = re.match(r'^url\s*=\s*["\']([^"\']+)["\']', line)
+        if in_registry and match is not None:
+            urls.append(match.group(1))
+    return urls
+
 def _hpm_asset_suffix():
-    """Release asset suffix for the worker platform (see install_hpm.sh)."""
+    """Release asset suffix for the worker platform (hpm-<tag>-<suffix>)."""
     system = platform.system().lower()
     if system == 'windows':
         return 'windows-x86_64.exe'
@@ -117,7 +155,7 @@ class HPMPlugin(DeadlinePlugin):
     task's package at its exact version, and whose `[scripts.task]` runs
     `python -m <module>` with `package-env = true`. On the worker this plugin:
 
-      1. self-bootstraps an hpm binary (so render nodes need no Desktop install),
+      1. self-bootstraps an hpm binary (so render nodes need no hpm install),
       2. `hpm -C <job_dir> install`s that manifest into the worker's local HPM
          store (resolving the package + its [python_dependencies] and pinning the
          Houdini-mapped CPython into a package-env venv),
@@ -125,12 +163,8 @@ class HPMPlugin(DeadlinePlugin):
          task inside that package-env — the package importable, its python deps
          on PYTHONPATH — entirely in native python.
 
-    The task itself drives Houdini's bundled tools directly (husk.exe, the Windows
-    USD resolver, hoiiotool/hffmpeg) entirely in native Windows python — no WSL;
-    none of that is the plugin's concern. This replaces the old design (a
-    hand-built uv venv +
-    PYTHONPATH + python_dependencies reconstruction + a WSL Runner.py): hpm now
-    owns the environment.
+    What the task does (drive husk, hoiiotool, ...) is not the plugin's
+    concern: hpm owns the environment, the task owns the work.
     """
 
     def __init__(self):
@@ -199,7 +233,7 @@ class HPMPlugin(DeadlinePlugin):
 
         An explicit HpmExecutable wins (escape hatch / air-gapped workers).
         Otherwise the plugin self-bootstraps a managed binary under
-        ~/.deadline/hpm so render nodes need no TumbleTrove Desktop install.
+        ~/.deadline/hpm so render nodes need no hpm install of their own.
         """
         override = self.GetPluginInfoEntryWithDefault('HpmExecutable', '').strip()
         if len(override) != 0:
@@ -208,8 +242,9 @@ class HPMPlugin(DeadlinePlugin):
 
     def get_hpm_version_target(self):
         """Which hpm to run: HpmVersion param, else HPM_VERSION env, else the
-        studio-pinned default (>= 0.22.2 for package-env). Do NOT default to
-        'latest' — an unvetted release can change behavior under the farm.
+        version this plugin release pins (>= 0.22.2 for package-env). Do NOT
+        default to 'latest': an unvetted release can change behavior under the
+        farm.
         """
         param = self.GetPluginInfoEntryWithDefault('HpmVersion', '').strip()
         if len(param) != 0:
@@ -334,11 +369,13 @@ class HPMPlugin(DeadlinePlugin):
         """
         self.LogInfo(' Probing connectivity '.center(100, '='))
         targets = [
-            ('tumbletrove registry', 'https://api.tumbletrove.com/v1/registry'),
-            ('tumbletrove packages', 'https://pkg.tumbletrove.com/'),
+            ('registry', url)
+            for url in _manifest_registry_urls(os.path.join(self._job_dir, 'hpm.toml'))
+        ]
+        targets += [
             ('pypi index', 'https://pypi.org/simple/'),
             ('pypi files', 'https://files.pythonhosted.org/'),
-            ('github releases', 'https://github.com/3db-dk/hpm/releases/latest'),
+            ('hpm releases', f'https://github.com/{HPM_RELEASES_REPO}/releases/latest'),
         ]
         for name, url in targets:
             try:
@@ -360,9 +397,9 @@ class HPMPlugin(DeadlinePlugin):
 
         - TH_FARM_DATA: the shared job data dir, so the task can resolve files
           bundled relative to it (it runs with CWD = the hpm manifest dir).
-        - every KEY=VALUE from the job's EnvironmentFile (OCIO, TH_CONFIG_PATH,
-          TH_PROJECT_PATH, ...): the task's `default_client()` reads these at
-          import, so they must be present before `hpm run task`.
+        - every KEY=VALUE from the job's EnvironmentFile (OCIO, project roots,
+          ...): whatever the task reads from its environment must be present
+          before `hpm run task`.
         """
         data_dir = self.get_cwd()
         if data_dir != '':
