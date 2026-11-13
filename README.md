@@ -114,7 +114,7 @@ worker can read before submitting.
 | `StartupDirectory` | yes | Shared job data dir (exported as `TH_FARM_DATA`; a relative first argument is resolved against it) |
 | `Arguments` | no | Task arguments; the frame range is appended |
 | `EnvironmentFile` | no | `.env` whose `KEY=VALUE`s are set in the task process env. Read as UTF-8, else the worker locale's encoding |
-| `HpmVersion` | no | hpm to self-bootstrap: pinned `vX.Y.Z` >= `v0.22.2`, or `latest`. Defaults to the worker's `HPM_VERSION` env var, else the version this plugin release pins (`v0.36.1`) |
+| `HpmVersion` | no | hpm to self-bootstrap: pinned `vX.Y.Z` >= `v0.22.2`, or `latest`. Defaults to the worker's `HPM_VERSION` env var, else the version this plugin release pins (`v0.40.1`) |
 | `HpmExecutable` | no | Explicit hpm path instead of the self-bootstrapped one (air-gapped workers) |
 | `HpmManagedDirectory` | no | Where the bootstrapped hpm lives (default `~/.deadline/hpm`) |
 | `SingleFramesOnly` | no | One frame per task (`false` when omitted from the plugin info; the Monitor form defaults it to `true`) |

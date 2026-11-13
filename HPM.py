@@ -25,7 +25,7 @@ HPM_LATEST_TTL_SECONDS = 6 * 60 * 60
 # The hpm this plugin release is tested against, used when neither HpmVersion
 # nor HPM_VERSION is set. package-env (the [scripts.task] mechanism this plugin
 # runs the task through) needs hpm >= 0.22.2.
-DEFAULT_HPM_VERSION = 'v0.36.1'
+DEFAULT_HPM_VERSION = 'v0.40.1'
 
 def GetDeadlinePlugin():
     return HPMPlugin()
@@ -142,8 +142,8 @@ def _parse_env_lines(text):
     return pairs
 
 def _normalize_tag(target):
-    """An hpm version target as a release tag: `0.36.1` and `v0.36.1` both
-    become `v0.36.1`."""
+    """An hpm version target as a release tag: `0.40.1` and `v0.40.1` both
+    become `v0.40.1`."""
     return target if target.startswith('v') else f'v{target}'
 
 def _is_absolute_path(path):
